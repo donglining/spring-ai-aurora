@@ -23,20 +23,22 @@ import com.alibaba.cloud.ai.graph.agent.flow.agent.SequentialAgent;
 import com.alibaba.cloud.ai.graph.agent.flow.builder.FlowAgentBuilder;
 import com.alibaba.cloud.ai.graph.agent.flow.builder.FlowGraphBuilder;
 import com.alibaba.cloud.ai.graph.agent.flow.enums.FlowAgentEnum;
-import com.alibaba.cloud.ai.graph.agent.flow.strategy.FlowGraphBuildingStrategyRegistry;
 import com.alibaba.cloud.ai.graph.agent.flow.strategy.FlowGraphBuildingStrategy;
+import com.alibaba.cloud.ai.graph.agent.flow.strategy.FlowGraphBuildingStrategyRegistry;
 import com.alibaba.cloud.ai.graph.agent.flow.strategy.SequentialGraphBuildingStrategy;
 import com.alibaba.cloud.ai.graph.state.strategy.AppendStrategy;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.resolution.ToolCallbackResolver;
 
 import java.util.HashMap;
 import java.util.List;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -75,8 +77,6 @@ class FlowAgentArchitectureTest {
 		SequentialAgent agent = SequentialAgent.builder()
 			.name("sequentialWorkflow")
 			.description("A sequential workflow")
-			.outputKey("final_result")
-			.inputKey("initial_data")
 			.subAgents(List.of(subAgent))
 			.state(() -> createDefaultStrategies())
 			.build();
@@ -85,8 +85,6 @@ class FlowAgentArchitectureTest {
 		assertNotNull(agent);
 		assertEquals("sequentialWorkflow", agent.name());
 		assertEquals("A sequential workflow", agent.description());
-		assertEquals("final_result", agent.outputKey());
-		assertEquals("initial_data", agent.inputKey());
 		assertEquals(1, agent.subAgents().size());
 	}
 
@@ -101,8 +99,6 @@ class FlowAgentArchitectureTest {
 		LlmRoutingAgent agent = LlmRoutingAgent.builder()
 			.name("intelligentRouter")
 			.description("Routes tasks intelligently")
-			.outputKey("routed_result")
-			.inputKey("task_description")
 			.subAgents(List.of(agent1, agent2))
 			.model(chatModel) // LLM-specific configuration
 			.state(() -> createDefaultStrategies())
@@ -112,8 +108,6 @@ class FlowAgentArchitectureTest {
 		assertNotNull(agent);
 		assertEquals("intelligentRouter", agent.name());
 		assertEquals("Routes tasks intelligently", agent.description());
-		assertEquals("routed_result", agent.outputKey());
-		assertEquals("task_description", agent.inputKey());
 		assertEquals(2, agent.subAgents().size());
 	}
 
@@ -129,8 +123,7 @@ class FlowAgentArchitectureTest {
 		ParallelAgent agent = ParallelAgent.builder()
 			.name("dataProcessingPipeline")
 			.description("Processes data in parallel")
-			.outputKey("processing_result")
-			.inputKey("raw_data")
+			.mergeOutputKey("processing_result")
 			.subAgents(List.of(agent1, agent2, agent3))
 			.mergeStrategy(new ParallelAgent.DefaultMergeStrategy())
 			.maxConcurrency(3)
@@ -141,8 +134,6 @@ class FlowAgentArchitectureTest {
 		assertNotNull(agent);
 		assertEquals("dataProcessingPipeline", agent.name());
 		assertEquals("Processes data in parallel", agent.description());
-		assertEquals("processing_result", agent.outputKey());
-		assertEquals("raw_data", agent.inputKey());
 		assertEquals(3, agent.subAgents().size());
 		assertEquals(3, agent.maxConcurrency());
 		assertTrue(agent.mergeStrategy() instanceof ParallelAgent.DefaultMergeStrategy);
@@ -152,13 +143,12 @@ class FlowAgentArchitectureTest {
 	void testBuilderValidation() {
 		// Test that builders properly validate required fields
 		assertThrows(IllegalArgumentException.class, () -> {
-			SequentialAgent.builder().description("Missing name").outputKey("output").build();
+			SequentialAgent.builder().description("Missing name").build();
 		});
 
 		assertThrows(IllegalArgumentException.class, () -> {
 			LlmRoutingAgent.builder()
 				.name("router")
-				.outputKey("output")
 				.subAgents(List.of(createMockReactAgent("agent", "output")))
 				.build(); // Missing ChatModel
 		});
@@ -166,10 +156,9 @@ class FlowAgentArchitectureTest {
 		assertThrows(IllegalArgumentException.class, () -> {
 			ParallelAgent.builder()
 				.name("parallel")
-				.outputKey("output")
 				.subAgents(List.of(createMockReactAgent("agent", "output"))) // Need at
-																				// least 2
-																				// agents
+				// least 2
+				// agents
 				.build();
 		});
 	}
@@ -236,8 +225,6 @@ class FlowAgentArchitectureTest {
 		// All methods should return the same builder instance for method chaining
 		assertSame(builder, builder.name("test"));
 		assertSame(builder, builder.description("test description"));
-		assertSame(builder, builder.outputKey("output"));
-		assertSame(builder, builder.inputKey("input"));
 		assertSame(builder, builder.maxConcurrency(5));
 		assertSame(builder, builder.mergeStrategy(new ParallelAgent.DefaultMergeStrategy()));
 	}

@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 import io.spring.initializr.generator.project.contributor.ProjectContributor;
+import org.springframework.core.annotation.Order;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.ToolFactory;
 import org.eclipse.jdt.core.formatter.CodeFormatter;
@@ -34,6 +35,8 @@ import org.eclipse.text.edits.TextEdit;
 /**
  * Use the CodeFormatter from Eclipse JDT Core to format all generated Java files.
  */
+// TODO: 移除未使用的import语句
+@Order(org.springframework.core.Ordered.LOWEST_PRECEDENCE)
 public class EclipseJdtFormatProjectContributor implements ProjectContributor {
 
 	@Override
@@ -51,6 +54,21 @@ public class EclipseJdtFormatProjectContributor implements ProjectContributor {
 		// Use space indentation, 4 spaces
 		options.put(DefaultCodeFormatterConstants.FORMATTER_TAB_CHAR, "space");
 		options.put(DefaultCodeFormatterConstants.FORMATTER_TAB_SIZE, "4");
+
+		// Line length and wrapping configuration
+		options.put(DefaultCodeFormatterConstants.FORMATTER_LINE_SPLIT, "120");
+
+		// Method chain formatting - moderate wrapping
+		options.put(DefaultCodeFormatterConstants.FORMATTER_ALIGNMENT_FOR_SELECTOR_IN_METHOD_INVOCATION,
+				DefaultCodeFormatterConstants.createAlignmentValue(false, // Don't force
+																			// wrapping
+						DefaultCodeFormatterConstants.WRAP_COMPACT, // Compact wrapping
+																	// when needed
+						DefaultCodeFormatterConstants.INDENT_DEFAULT));
+
+		// Keep simple statements on one line
+		options.put(DefaultCodeFormatterConstants.FORMATTER_KEEP_SIMPLE_IF_ON_ONE_LINE,
+				DefaultCodeFormatterConstants.TRUE);
 
 		CodeFormatter formatter = ToolFactory.createCodeFormatter(options);
 
