@@ -15,26 +15,26 @@
  */
 package com.alibaba.cloud.ai.graph.node;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.action.NodeAction;
-import com.alibaba.cloud.ai.graph.streaming.StreamingChatGenerator;
+import reactor.core.publisher.Flux;
+
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.util.StringUtils;
-import reactor.core.publisher.Flux;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import static com.alibaba.cloud.ai.graph.utils.Messageutils.convertToMessages;
 
 public class LlmNode implements NodeAction {
 
@@ -81,26 +81,23 @@ public class LlmNode implements NodeAction {
 		this.stream = stream;
 	}
 
+	public static Builder builder() {
+		return new Builder();
+	}
+
 	@Override
 	public Map<String, Object> apply(OverAllState state) throws Exception {
 		initNodeWithState(state);
 
 		// add streaming support
 		if (Boolean.TRUE.equals(stream)) {
-			Flux<ChatResponse> chatResponseFlux = stream();
-			var generator = StreamingChatGenerator.builder()
-				.startingNode("llmNode")
-				.startingState(state)
-				.mapResult(response -> Map.of(StringUtils.hasLength(this.outputKey) ? this.outputKey : "messages",
-						Objects.requireNonNull(response.getResult().getOutput())))
-				.build(chatResponseFlux);
-			return Map.of(StringUtils.hasLength(this.outputKey) ? this.outputKey : "messages", generator);
+			Flux<ChatResponse> chatResponseFlux = stream(state);
+			return Map.of(StringUtils.hasLength(this.outputKey) ? this.outputKey : "messages", chatResponseFlux);
 		}
 		else {
-
 			AssistantMessage responseOutput;
 			try {
-				ChatResponse response = call();
+				ChatResponse response = call(state);
 				responseOutput = response.getResult().getOutput();
 			}
 			catch (Exception e) {
@@ -143,11 +140,19 @@ public class LlmNode implements NodeAction {
 			this.params = filledParams;
 		}
 		if (StringUtils.hasLength(messagesKey)) {
-			this.messages = (List<Message>) state.value(messagesKey).orElse(this.messages);
+			Object messagesValue = state.value(messagesKey).orElse(null);
+			if (messagesValue != null) {
+				List<Message> convertedMessages = convertToMessages(messagesValue);
+				this.messages = convertedMessages.isEmpty() ? this.messages : convertedMessages;
+			}
 		}
 		if (StringUtils.hasLength(userPrompt) && !params.isEmpty()) {
 			this.userPrompt = renderPromptTemplate(userPrompt, params);
 		}
+	}
+
+	public void setToolCallbacks(List<ToolCallback> toolCallbacks) {
+		this.toolCallbacks = toolCallbacks;
 	}
 
 	private String renderPromptTemplate(String prompt, Map<String, Object> params) {
@@ -155,26 +160,26 @@ public class LlmNode implements NodeAction {
 		return promptTemplate.render(params);
 	}
 
-	public Flux<ChatResponse> stream() {
-		return buildChatClientRequestSpec().stream().chatResponse();
+	public Flux<ChatResponse> stream(OverAllState state) {
+		return buildChatClientRequestSpec(state).stream().chatResponse();
 	}
 
-	public ChatResponse call() {
-		return buildChatClientRequestSpec().call().chatResponse();
+	public ChatResponse call(OverAllState state) {
+		return buildChatClientRequestSpec(state).call().chatResponse();
 	}
 
-	private ChatClient.ChatClientRequestSpec buildChatClientRequestSpec() {
+	private ChatClient.ChatClientRequestSpec buildChatClientRequestSpec(OverAllState state) {
 		ChatClient.ChatClientRequestSpec chatClientRequestSpec = chatClient.prompt()
-			.options(ToolCallingChatOptions.builder()
 				.toolCallbacks(toolCallbacks)
-				.internalToolExecutionEnabled(false)
-				.build())
-			.messages(messages)
-			.advisors(advisors);
+				.messages(messages)
+				.advisors(advisors);
 
 		if (StringUtils.hasLength(systemPrompt)) {
 			if (!params.isEmpty()) {
 				systemPrompt = renderPromptTemplate(systemPrompt, params);
+			} else {
+				// try render with state
+				systemPrompt = renderPromptTemplate(systemPrompt, state.data());
 			}
 			chatClientRequestSpec.system(systemPrompt);
 		}
@@ -187,10 +192,6 @@ public class LlmNode implements NodeAction {
 		}
 
 		return chatClientRequestSpec;
-	}
-
-	public static Builder builder() {
-		return new Builder();
 	}
 
 	public static class Builder {

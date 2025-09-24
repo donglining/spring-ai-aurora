@@ -15,23 +15,22 @@
  */
 package com.alibaba.cloud.ai.graph.agent.flow.agent;
 
-import com.alibaba.cloud.ai.graph.CompiledGraph;
 import com.alibaba.cloud.ai.graph.OverAllState;
 import com.alibaba.cloud.ai.graph.StateGraph;
-import com.alibaba.cloud.ai.graph.agent.BaseAgent;
+import com.alibaba.cloud.ai.graph.agent.Agent;
+import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.alibaba.cloud.ai.graph.agent.flow.builder.FlowAgentBuilder;
 import com.alibaba.cloud.ai.graph.agent.flow.builder.FlowGraphBuilder;
 import com.alibaba.cloud.ai.graph.agent.flow.enums.FlowAgentEnum;
-import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import com.alibaba.cloud.ai.graph.exception.GraphStateException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * ParallelAgent executes multiple sub-agents in parallel and merges their results.
@@ -57,20 +56,20 @@ public class ParallelAgent extends FlowAgent {
 
 	private final MergeStrategy mergeStrategy;
 
+	private String mergeOutputKey;
+
 	private final Integer maxConcurrency;
 
 	protected ParallelAgent(ParallelAgentBuilder builder) throws GraphStateException {
-		super(builder.name, builder.description, builder.outputKey, builder.inputKey, builder.keyStrategyFactory,
-				builder.compileConfig, builder.subAgents);
+		super(builder.name, builder.description,
+			  builder.keyStrategyFactory, builder.compileConfig, builder.subAgents);
 		this.mergeStrategy = builder.mergeStrategy != null ? builder.mergeStrategy : new DefaultMergeStrategy();
 		this.maxConcurrency = builder.maxConcurrency;
-		this.graph = initGraph();
+		this.mergeOutputKey = builder.mergeOutputKey;
 	}
 
-	@Override
-	public Optional<OverAllState> invoke(Map<String, Object> input) throws GraphStateException, GraphRunnerException {
-		CompiledGraph compiledGraph = getAndCompileGraph();
-		return compiledGraph.invoke(input);
+	public static ParallelAgentBuilder builder() {
+		return new ParallelAgentBuilder();
 	}
 
 	@Override
@@ -90,6 +89,10 @@ public class ParallelAgent extends FlowAgent {
 		return mergeStrategy;
 	}
 
+	public String mergeOutputKey() {
+		return mergeOutputKey;
+	}
+
 	/**
 	 * Gets the maximum concurrency limit for this ParallelAgent.
 	 * @return the max concurrency, or null if unlimited
@@ -98,8 +101,19 @@ public class ParallelAgent extends FlowAgent {
 		return maxConcurrency;
 	}
 
-	public static ParallelAgentBuilder builder() {
-		return new ParallelAgentBuilder();
+	/**
+	 * Strategy interface for merging parallel execution results.
+	 */
+	public interface MergeStrategy {
+
+		/**
+		 * Merges results from parallel sub-agents.
+		 * @param subAgentResults map of sub-agent output keys to their results
+		 * @param overallState the complete state including all context
+		 * @return the merged result
+		 */
+		Object merge(Map<String, Object> subAgentResults, OverAllState overallState);
+
 	}
 
 	/**
@@ -128,6 +142,8 @@ public class ParallelAgent extends FlowAgent {
 
 		private Integer maxConcurrency;
 
+		private String mergeOutputKey;
+
 		/**
 		 * Sets the merge strategy for combining parallel execution results.
 		 * @param mergeStrategy the strategy to use for merging results
@@ -135,6 +151,11 @@ public class ParallelAgent extends FlowAgent {
 		 */
 		public ParallelAgentBuilder mergeStrategy(MergeStrategy mergeStrategy) {
 			this.mergeStrategy = mergeStrategy;
+			return this;
+		}
+
+		public ParallelAgentBuilder mergeOutputKey(String mergeOutputKey) {
+			this.mergeOutputKey = mergeOutputKey;
 			return this;
 		}
 
@@ -206,12 +227,14 @@ public class ParallelAgent extends FlowAgent {
 			Set<String> outputKeys = new HashSet<>();
 			Set<String> duplicateKeys = new HashSet<>();
 
-			for (BaseAgent subAgent : subAgents) {
-				String outputKey = subAgent.outputKey();
-				if (outputKey != null) {
-					if (!outputKeys.add(outputKey)) {
-						// This key was already seen, it's a duplicate
-						duplicateKeys.add(outputKey);
+			for (Agent subAgent : subAgents) {
+				if (subAgent instanceof ReactAgent subReactAgent) {
+					String outputKey = subReactAgent.getOutputKey();
+					if (outputKey != null) {
+						if (!outputKeys.add(outputKey)) {
+							// This key was already seen, it's a duplicate
+							duplicateKeys.add(outputKey);
+						}
 					}
 				}
 			}
@@ -241,16 +264,13 @@ public class ParallelAgent extends FlowAgent {
 		 * </p>
 		 */
 		private void validateInputKeyCompatibility() {
-			String parentOutputKey = this.outputKey;
-			if (parentOutputKey == null) {
-				logger.warn("Parent agent '{}' has no outputKey defined. This may cause data flow issues "
-						+ "as sub-agents won't receive input data.", this.name);
-			}
-
 			// Check if sub-agents have outputKeys defined (they will be used as input
 			// keys for downstream agents)
-			for (BaseAgent subAgent : subAgents) {
-				String subAgentOutputKey = subAgent.outputKey();
+			for (Agent subAgent : subAgents) {
+				if (!(subAgent instanceof ReactAgent)) {
+					continue;
+				}
+				String subAgentOutputKey = ((ReactAgent)subAgent).getOutputKey();
 				if (subAgentOutputKey == null) {
 					logger.warn("Sub-agent '{}' has no outputKey defined. This may cause data flow issues "
 							+ "as downstream agents won't receive data from this agent.", subAgent.name());
@@ -268,21 +288,6 @@ public class ParallelAgent extends FlowAgent {
 			validate();
 			return new ParallelAgent(this);
 		}
-
-	}
-
-	/**
-	 * Strategy interface for merging parallel execution results.
-	 */
-	public interface MergeStrategy {
-
-		/**
-		 * Merges results from parallel sub-agents.
-		 * @param subAgentResults map of sub-agent output keys to their results
-		 * @param overallState the complete state including all context
-		 * @return the merged result
-		 */
-		Object merge(Map<String, Object> subAgentResults, OverAllState overallState);
 
 	}
 
